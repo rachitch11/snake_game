@@ -19,7 +19,9 @@ Install pygame
 bash 
 
 pip install pygame
+
 Run the game
+
 bash
 python snake_game.py
 
