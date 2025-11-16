@@ -23,7 +23,7 @@ pip install pygame
 Run the game
 
 bash
-python snake_game.py
+python snake.py
 
 The game window (800×700) will open.
 
