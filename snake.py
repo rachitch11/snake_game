@@ -1,0 +1,353 @@
+import pygame
+import random
+import sys
+import math
+from collections import deque
+
+# Initialize Pygame
+pygame.init()
+
+# Constants
+WIDTH, HEIGHT = 800, 700
+GRID_SIZE = 25
+GRID_WIDTH = 28
+GRID_HEIGHT = 24
+BASE_FPS = 8
+
+# Colors
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+GREEN = (0, 255, 0)
+DARK_GREEN = (0, 180, 0)
+LIGHT_GREEN = (100, 255, 100)
+RED = (255, 50, 50)
+GOLD = (255, 215, 0)
+PURPLE = (200, 50, 255)
+GRAY = (120, 120, 120)  # BRIGHTER GRID
+DARK_GRAY = (40, 40, 40)
+
+# Setup display
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Enhanced Snake Game 🔥")
+clock = pygame.time.Clock()
+font = pygame.font.SysFont("Arial", 24, bold=True)
+big_font = pygame.font.SysFont("Arial", 48, bold=True)
+huge_font = pygame.font.SysFont("Arial", 72, bold=True)
+
+# Directions
+UP = (0, -1)
+DOWN = (0, 1)
+LEFT = (-1, 0)
+RIGHT = (1, 0)
+
+class Particle:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.vx = random.uniform(-3, 3)
+        self.vy = random.uniform(-3, 3)
+        self.color = color
+        self.life = 60
+        self.max_life = 60
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.1
+        self.life -= 1
+
+    def draw(self, surface):
+        alpha = self.life / self.max_life
+        size = int(5 * alpha)
+        if size > 0:
+            s = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*self.color, int(200 * alpha)), (size, size), size)
+            surface.blit(s, (self.x - size, self.y - size))
+
+class Snake:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.body = deque([(GRID_WIDTH // 2, GRID_HEIGHT // 2)])
+        self.direction = RIGHT
+        self.grow_pending = 0
+        self.trail_alpha = deque([255])
+
+    def move(self):
+        head = self.body[0]
+        new_head = (head[0] + self.direction[0], head[1] + self.direction[1])
+        self.body.appendleft(new_head)
+
+        if self.grow_pending > 0:
+            self.grow_pending -= 1
+            self.trail_alpha.appendleft(255)
+        else:
+            self.body.pop()
+            if self.trail_alpha:
+                self.trail_alpha.pop()
+
+        # Head pulse
+        if len(self.trail_alpha) > 0:
+            self.trail_alpha[0] = 255
+        # Tail fade
+        if len(self.trail_alpha) > 1:
+            self.trail_alpha[-1] = max(80, self.trail_alpha[-1] - 15)
+
+    def grow(self):
+        self.grow_pending += 2
+
+    def change_direction(self, new_dir):
+        opposites = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
+        if new_dir != opposites.get(self.direction):
+            self.direction = new_dir
+
+    def check_collision(self):
+        head = self.body[0]
+        if (head[0] < 0 or head[0] >= GRID_WIDTH or
+            head[1] < 0 or head[1] >= GRID_HEIGHT):
+            return True
+        if len(self.body) > 1 and head in list(self.body)[1:]:
+            return True
+        return False
+
+    def draw(self, surface):
+        for i, segment in enumerate(self.body):
+            alpha = 255
+            if i < len(self.trail_alpha):
+                alpha = self.trail_alpha[i]
+            else:
+                alpha = max(80, 255 - i * 15)
+
+            # Head is bright green, body fades
+            if i == 0:
+                color = GREEN
+            else:
+                fade = i / max(1, len(self.body))
+                color = (int(DARK_GREEN[0] * (1-fade) + 100*fade),
+                        int(DARK_GREEN[1] * (1-fade) + 150*fade),
+                        int(DARK_GREEN[2] * (1-fade) + 50*fade))
+
+            x = segment[0] * GRID_SIZE
+            y = segment[1] * GRID_SIZE
+
+            # Glow effect
+            glow_surf = pygame.Surface((GRID_SIZE+10, GRID_SIZE+10), pygame.SRCALPHA)
+            glow_size = int(GRID_SIZE * 0.4 + i * 0.1)
+            glow_alpha = int(100 * alpha / 255)
+            pygame.draw.circle(glow_surf, (*LIGHT_GREEN, glow_alpha), 
+                              (GRID_SIZE//2 + 5, GRID_SIZE//2 + 5), glow_size)
+            surface.blit(glow_surf, (x-5, y-5))
+
+            # Main body
+            body_surf = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+            inner_rect = pygame.Rect(3, 3, GRID_SIZE-6, GRID_SIZE-6)
+            pygame.draw.rect(body_surf, (*color, alpha), inner_rect)
+            pygame.draw.rect(body_surf, WHITE, inner_rect, 1)
+            surface.blit(body_surf, (x, y))
+
+class Food:
+    def __init__(self, snake):
+        self.snake = snake
+        self.respawn()
+        self.pulse = 0
+
+    def respawn(self):
+        while True:
+            x = random.randint(0, GRID_WIDTH - 1)
+            y = random.randint(0, GRID_HEIGHT - 1)
+            if (x, y) not in self.snake.body:
+                self.pos = (x, y)
+                break
+        self.pulse = 0
+
+    def update(self):
+        self.pulse += 0.15
+
+    def draw(self, surface):
+        pulse_scale = 1 + 0.15 * math.sin(self.pulse)
+        size = int(GRID_SIZE * 0.65 * pulse_scale)
+        offset = (GRID_SIZE - size) // 2
+        
+        x = self.pos[0] * GRID_SIZE
+        y = self.pos[1] * GRID_SIZE
+
+        # Glow ring
+        glow_surf = pygame.Surface((GRID_SIZE+12, GRID_SIZE+12), pygame.SRCALPHA)
+        glow_size = size//2 + 10
+        pygame.draw.circle(glow_surf, (*GOLD, 150), 
+                          (GRID_SIZE//2 + 6, GRID_SIZE//2 + 6), glow_size)
+        surface.blit(glow_surf, (x-6, y-6))
+        
+        # Main food
+        food_surf = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+        pygame.draw.circle(food_surf, RED, (GRID_SIZE//2, GRID_SIZE//2), size//2)
+        pygame.draw.circle(food_surf, GOLD, (GRID_SIZE//2, GRID_SIZE//2), size//2, 2)
+        surface.blit(food_surf, (x, y))
+
+def get_fps(score):
+    if score < 30:
+        return BASE_FPS
+    elif score < 60:
+        return BASE_FPS + 2
+    elif score < 90:
+        return BASE_FPS + 4
+    else:
+        return BASE_FPS + 5
+
+def draw_gradient(surface):
+    for y in range(HEIGHT):
+        ratio = y / HEIGHT
+        r = int(15 + 25 * ratio)
+        g = int(5 + 15 * ratio)
+        b = int(25 + 35 * ratio)
+        pygame.draw.line(surface, (r, g, b), (0, y), (WIDTH, y))
+
+def draw_grid(surface):
+    # Vertical lines
+    for x in range(0, GRID_WIDTH * GRID_SIZE, GRID_SIZE):
+        pygame.draw.line(surface, GRAY, (x, 0), (x, GRID_HEIGHT * GRID_SIZE), 1)
+    # Horizontal lines  
+    for y in range(0, GRID_HEIGHT * GRID_SIZE, GRID_SIZE):
+        pygame.draw.line(surface, GRAY, (0, y), (GRID_WIDTH * GRID_SIZE, y), 1)
+
+def draw_ui(score, combo):
+    # Background gradient
+    draw_gradient(screen)
+    
+    # UI text
+    score_text = font.render(f"Score: {score}", True, WHITE)
+    fps_text = font.render(f"Speed: {get_fps(score)}", True, LIGHT_GREEN)
+    combo_text = font.render(f"Combo: {combo:.1f}x", True, GOLD)
+    
+    screen.blit(score_text, (20, 20))
+    screen.blit(fps_text, (20, 55))
+    screen.blit(combo_text, (20, 90))
+    
+    # Instructions
+    instr = pygame.font.SysFont("Arial", 18).render("Arrow Keys to Move", True, WHITE)
+    screen.blit(instr, (20, HEIGHT - 40))
+
+def game_over_screen(score):
+    screen.fill((15, 8, 25))
+    
+    # Starfield effect
+    for _ in range(80):
+        x = random.randint(0, WIDTH)
+        y = random.randint(0, HEIGHT)
+        size = random.randint(1, 3)
+        pygame.draw.circle(screen, (255, 255, 255, 30), (x, y), size)
+    
+    # Text
+    game_over_text = huge_font.render("GAME OVER", True, RED)
+    score_text = big_font.render(f"Final Score: {score}", True, WHITE)
+    restart_text = font.render("Press R to Restart or Q to Quit", True, WHITE)
+    
+    # Center text
+    screen.blit(game_over_text, (WIDTH//2 - game_over_text.get_width()//2, HEIGHT//3))
+    screen.blit(score_text, (WIDTH//2 - score_text.get_width()//2, HEIGHT//2))
+    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 80))
+    pygame.display.flip()
+
+def main():
+    snake = Snake()
+    food = Food(snake)
+    particles = []
+    score = 0
+    combo = 1.0
+    running = True
+    game_over = False
+
+    while running:
+        current_fps = get_fps(score)
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if game_over:
+                    if event.key == pygame.K_r:
+                        snake.reset()
+                        food = Food(snake)
+                        particles.clear()
+                        score = 0
+                        combo = 1.0
+                        game_over = False
+                        continue
+                    if event.key == pygame.K_q:
+                        pygame.quit()
+                        sys.exit()
+                else:
+                    if event.key == pygame.K_UP: 
+                        snake.change_direction(UP)
+                    elif event.key == pygame.K_DOWN: 
+                        snake.change_direction(DOWN)
+                    elif event.key == pygame.K_LEFT: 
+                        snake.change_direction(LEFT)
+                    elif event.key == pygame.K_RIGHT: 
+                        snake.change_direction(RIGHT)
+
+        if not game_over:
+            snake.move()
+            food.update()
+
+            # Eat food
+            if snake.body[0] == food.pos:
+                score += int(10 * combo)
+                combo += 0.15
+                snake.grow()
+                
+                # EXPLOSION!
+                for _ in range(35):
+                    particles.append(Particle(
+                        food.pos[0] * GRID_SIZE + GRID_SIZE//2,
+                        food.pos[1] * GRID_SIZE + GRID_SIZE//2,
+                        random.choice([GOLD, (255, 150, 100), PURPLE, RED])
+                    ))
+                food.respawn()
+
+            # Update particles
+            for p in particles[:]:
+                p.update()
+                if p.life <= 0:
+                    particles.remove(p)
+
+            # Collision
+            if snake.check_collision():
+                game_over = True
+
+        # RENDERING - FIXED!
+        # 1. Draw UI first (covers whole screen)
+        draw_ui(score, combo)
+        
+        # 2. Game area
+        game_offset_x = (WIDTH - GRID_WIDTH * GRID_SIZE) // 2
+        game_offset_y = 120
+        
+        # Create game surface
+        game_surface = pygame.Surface((GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE))
+        game_surface.fill((8, 4, 15))  # Dark blue bg
+        
+        # Draw on game surface ONLY
+        draw_grid(game_surface)  # ✅ FIXED: Now on game_surface
+        snake.draw(game_surface)
+        food.draw(game_surface)
+        
+        # Particles (RELATIVE to game_surface)
+        for p in particles:
+            p.draw(game_surface)
+        
+        # Blit game surface to screen
+        screen.blit(game_surface, (game_offset_x, game_offset_y))
+
+        if game_over:
+            game_over_screen(score)
+
+        pygame.display.flip()
+        clock.tick(current_fps)
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
