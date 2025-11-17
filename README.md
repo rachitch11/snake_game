@@ -5,11 +5,15 @@ Snake Game python pygame and pyopengl
 1. **Clone or download the repo**  
    ```bash
    git clone https://github.com/rachitch11/snake_game.git
+   
    cd snake_game
 or just download the ZIP and extract it.
 
 (Recommended)
-Create a virtual environmentbashpython -m venv venv
+
+Create a virtual environment
+
+bashpython -m venv venv
 
 source venv/bin/activate   # Linux / macOS
 
