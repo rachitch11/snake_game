@@ -1,5 +1,9 @@
 # snake_game
 Snake Game python pygame and pyopengl
+
+
+wnat to play live      click    https://spontaneous-souffle-14567a.netlify.app/
+
 ## How to Run (Step-by-Step)
 
 1. **Clone or download the repo**  
