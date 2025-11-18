@@ -1,393 +1,394 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Snake Game - Play Now!</title>
-  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Enhanced Snake — Play Now</title>
   <style>
-    body { margin:0; background:#111; color:white; font-family:Arial; text-align:center; }
-    h1 { color:#0f0; margin:20px; }
-    #output { border:3px solid #333; margin:20px auto; display:block; }
-    .loading { font-size:24px; color:#0f0; margin:50px; animation:glow 1.5s infinite; }
-    @keyframes glow { 0%,100% { opacity:0.7; } 50% { opacity:1; } }
+    :root{
+      --bg-1: #0f0919;
+      --panel-bg: #0f0919;
+      --ui-white: #ffffff;
+      --light-green: #64ff64;
+      --green: #00ff00;
+      --dark-green: #00b400;
+      --gold: #ffd700;
+      --red: #ff3232;
+      --grid: #787878;
+    }
+    html,body{height:100%;margin:0;font-family:Arial, Helvetica, sans-serif;background:linear-gradient(180deg,#0d0712,#05040a);}
+    .wrap{display:flex;align-items:flex-start;gap:20px;padding:20px;max-width:1200px;margin:0 auto;}
+    .ui{width:260px;color:var(--ui-white);}
+    canvas{background:#080415;display:block;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.6);}
+    .btn{display:inline-block;padding:10px 14px;background:#222;color:#fff;border-radius:6px;text-decoration:none;cursor:pointer;margin-top:10px}
+    .muted{opacity:.85;color:#ddd;font-size:13px}
+    h1{color:var(--ui-white);font-size:20px;margin:0 0 8px}
+    .stat{margin:8px 0;font-weight:bold}
+    .small{font-size:13px;color:#ddd}
+    .center{display:flex;align-items:center;gap:8px}
   </style>
 </head>
 <body>
-  <h1>Snake Game (Python in Browser)</h1>
-  <div class="loading" id="status">Loading Python Engine... Please wait</div>
-  <div id="output"></div>
+  <div class="wrap">
+    <div>
+      <canvas id="game" width="700" height="700"></canvas>
+    </div>
+    <div class="ui">
+      <h1>Enhanced Snake — Play Now</h1>
+      <div class="muted small">Arrow keys to move • Press R to restart • Q to quit (close tab)</div>
+      <div class="stat" id="score">Score: 0</div>
+      <div class="stat" id="speed">Speed: 8</div>
+      <div class="stat" id="combo">Combo: 1.0x</div>
+      <button id="restartBtn" class="btn">Restart</button>
+      <div style="height:18px"></div>
+      <div class="small muted">Host instructions below — 1-click deploy to GitHub Pages or Netlify.</div>
+      <div style="height:8px"></div>
+      <a id="ghTemplate" class="btn" href="#" target="_blank">Open on GitHub (instructions)</a>
+    </div>
+  </div>
 
-  <script type="text/python">
-# === YOUR FULL PYTHON CODE STARTS HERE ===
-import pygame
-import random
-import sys
-import math
-from collections import deque
+<script>
+/* ---------- Game config (mirror of your Python constants) ---------- */
+const GRID_SIZE=25, GRID_W=28, GRID_H=24;
+const WIDTH = GRID_W*GRID_SIZE, HEIGHT = GRID_H*GRID_SIZE + 140; // allow UI space
+const BASE_FPS = 8;
 
-# Initialize Pygame
-pygame.init()
+/* ---------- canvas setup ---------- */
+const canvas = document.getElementById('game');
+canvas.width = WIDTH;
+canvas.height = HEIGHT;
+const ctx = canvas.getContext('2d');
 
-# Constants
-WIDTH, HEIGHT = 800, 700
-GRID_SIZE = 25
-GRID_WIDTH = 28
-GRID_HEIGHT = 24
-BASE_FPS = 8
+/* ---------- state ---------- */
+let snake, food, particles, score, combo, running, gameOver, lastTick, fps;
+const scoreEl = document.getElementById('score');
+const speedEl = document.getElementById('speed');
+const comboEl = document.getElementById('combo');
+document.getElementById('restartBtn').onclick = ()=> init();
 
-# Colors
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-GREEN = (0, 255, 0)
-DARK_GREEN = (0, 180, 0)
-LIGHT_GREEN = (100, 255, 100)
-RED = (255, 50, 50)
-GOLD = (255, 215, 0)
-PURPLE = (200, 50, 255)
-GRAY = (120, 120, 120)  # BRIGHTER GRID
-DARK_GRAY = (40, 40, 40)
+/* ---------- helpers ---------- */
+function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+function getFps(scr){
+  if(scr<30) return BASE_FPS;
+  if(scr<60) return BASE_FPS+2;
+  if(scr<90) return BASE_FPS+4;
+  return BASE_FPS+5;
+}
 
-# Setup display
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Enhanced Snake Game 🔥")
-clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 24, bold=True)
-big_font = pygame.font.SysFont("Arial", 48, bold=True)
-huge_font = pygame.font.SysFont("Arial", 72, bold=True)
+/* ---------- Particle ---------- */
+class Particle {
+  constructor(x,y,color){
+    this.x=x; this.y=y; this.vx=(Math.random()*6-3); this.vy=(Math.random()*6-3);
+    this.color=color; this.life=60; this.maxLife=60;
+  }
+  update(){ this.x+=this.vx; this.y+=this.vy; this.vy+=0.1; this.life--; }
+  draw(g){
+    const alpha=this.life/this.maxLife;
+    const size = Math.max(1, Math.floor(5 * alpha));
+    g.save();
+    g.globalAlpha = Math.min(1, 0.9 * alpha);
+    g.fillStyle = this.color;
+    g.beginPath();
+    g.arc(this.x, this.y, size, 0, Math.PI*2);
+    g.fill();
+    g.restore();
+  }
+}
 
-# Directions
-UP = (0, -1)
-DOWN = (0, 1)
-LEFT = (-1, 0)
-RIGHT = (1, 0)
-
-class Particle:
-    def __init__(self, x, y, color):
-        self.x = x
-        self.y = y
-        self.vx = random.uniform(-3, 3)
-        self.vy = random.uniform(-3, 3)
-        self.color = color
-        self.life = 60
-        self.max_life = 60
-
-    def update(self):
-        self.x += self.vx
-        self.y += self.vy
-        self.vy += 0.1
-        self.life -= 1
-
-    def draw(self, surface):
-        alpha = self.life / self.max_life
-        size = int(5 * alpha)
-        if size > 0:
-            s = pygame.Surface((size*2, size*2), pygame.SRCALPHA)
-            pygame.draw.circle(s, (*self.color, int(200 * alpha)), (size, size), size)
-            surface.blit(s, (self.x - size, self.y - size))
-
-class Snake:
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.body = deque([(GRID_WIDTH // 2, GRID_HEIGHT // 2)])
-        self.direction = RIGHT
-        self.grow_pending = 0
-        self.trail_alpha = deque([255])
-
-    def move(self):
-        head = self.body[0]
-        new_head = (head[0] + self.direction[0], head[1] + self.direction[1])
-        self.body.appendleft(new_head)
-
-        if self.grow_pending > 0:
-            self.grow_pending -= 1
-            self.trail_alpha.appendleft(255)
-        else:
-            self.body.pop()
-            if self.trail_alpha:
-                self.trail_alpha.pop()
-
-        # Head pulse
-        if len(self.trail_alpha) > 0:
-            self.trail_alpha[0] = 255
-        # Tail fade
-        if len(self.trail_alpha) > 1:
-            self.trail_alpha[-1] = max(80, self.trail_alpha[-1] - 15)
-
-    def grow(self):
-        self.grow_pending += 2
-
-    def change_direction(self, new_dir):
-        opposites = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
-        if new_dir != opposites.get(self.direction):
-            self.direction = new_dir
-
-    def check_collision(self):
-        head = self.body[0]
-        if (head[0] < 0 or head[0] >= GRID_WIDTH or
-            head[1] < 0 or head[1] >= GRID_HEIGHT):
-            return True
-        if len(self.body) > 1 and head in list(self.body)[1:]:
-            return True
-        return False
-
-    def draw(self, surface):
-        for i, segment in enumerate(self.body):
-            alpha = 255
-            if i < len(self.trail_alpha):
-                alpha = self.trail_alpha[i]
-            else:
-                alpha = max(80, 255 - i * 15)
-
-            # Head is bright green, body fades
-            if i == 0:
-                color = GREEN
-            else:
-                fade = i / max(1, len(self.body))
-                color = (int(DARK_GREEN[0] * (1-fade) + 100*fade),
-                        int(DARK_GREEN[1] * (1-fade) + 150*fade),
-                        int(DARK_GREEN[2] * (1-fade) + 50*fade))
-
-            x = segment[0] * GRID_SIZE
-            y = segment[1] * GRID_SIZE
-
-            # Glow effect
-            glow_surf = pygame.Surface((GRID_SIZE+10, GRID_SIZE+10), pygame.SRCALPHA)
-            glow_size = int(GRID_SIZE * 0.4 + i * 0.1)
-            glow_alpha = int(100 * alpha / 255)
-            pygame.draw.circle(glow_surf, (*LIGHT_GREEN, glow_alpha), 
-                              (GRID_SIZE//2 + 5, GRID_SIZE//2 + 5), glow_size)
-            surface.blit(glow_surf, (x-5, y-5))
-
-            # Main body
-            body_surf = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-            inner_rect = pygame.Rect(3, 3, GRID_SIZE-6, GRID_SIZE-6)
-            pygame.draw.rect(body_surf, (*color, alpha), inner_rect)
-            pygame.draw.rect(body_surf, WHITE, inner_rect, 1)
-            surface.blit(body_surf, (x, y))
-
-class Food:
-    def __init__(self, snake):
-        self.snake = snake
-        self.respawn()
-        self.pulse = 0
-
-    def respawn(self):
-        while True:
-            x = random.randint(0, GRID_WIDTH - 1)
-            y = random.randint(0, GRID_HEIGHT - 1)
-            if (x, y) not in self.snake.body:
-                self.pos = (x, y)
-                break
-        self.pulse = 0
-
-    def update(self):
-        self.pulse += 0.15
-
-    def draw(self, surface):
-        pulse_scale = 1 + 0.15 * math.sin(self.pulse)
-        size = int(GRID_SIZE * 0.65 * pulse_scale)
-        offset = (GRID_SIZE - size) // 2
-        
-        x = self.pos[0] * GRID_SIZE
-        y = self.pos[1] * GRID_SIZE
-
-        # Glow ring
-        glow_surf = pygame.Surface((GRID_SIZE+12, GRID_SIZE+12), pygame.SRCALPHA)
-        glow_size = size//2 + 10
-        pygame.draw.circle(glow_surf, (*GOLD, 150), 
-                          (GRID_SIZE//2 + 6, GRID_SIZE//2 + 6), glow_size)
-        surface.blit(glow_surf, (x-6, y-6))
-        
-        # Main food
-        food_surf = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-        pygame.draw.circle(food_surf, RED, (GRID_SIZE//2, GRID_SIZE//2), size//2)
-        pygame.draw.circle(food_surf, GOLD, (GRID_SIZE//2, GRID_SIZE//2), size//2, 2)
-        surface.blit(food_surf, (x, y))
-
-def get_fps(score):
-    if score < 30:
-        return BASE_FPS
-    elif score < 60:
-        return BASE_FPS + 2
-    elif score < 90:
-        return BASE_FPS + 4
-    else:
-        return BASE_FPS + 5
-
-def draw_gradient(surface):
-    for y in range(HEIGHT):
-        ratio = y / HEIGHT
-        r = int(15 + 25 * ratio)
-        g = int(5 + 15 * ratio)
-        b = int(25 + 35 * ratio)
-        pygame.draw.line(surface, (r, g, b), (0, y), (WIDTH, y))
-
-def draw_grid(surface):
-    # Vertical lines
-    for x in range(0, GRID_WIDTH * GRID_SIZE, GRID_SIZE):
-        pygame.draw.line(surface, GRAY, (x, 0), (x, GRID_HEIGHT * GRID_SIZE), 1)
-    # Horizontal lines  
-    for y in range(0, GRID_HEIGHT * GRID_SIZE, GRID_SIZE):
-        pygame.draw.line(surface, GRAY, (0, y), (GRID_WIDTH * GRID_SIZE, y), 1)
-
-def draw_ui(score, combo):
-    # Background gradient
-    draw_gradient(screen)
-    
-    # UI text
-    score_text = font.render(f"Score: {score}", True, WHITE)
-    fps_text = font.render(f"Speed: {get_fps(score)}", True, LIGHT_GREEN)
-    combo_text = font.render(f"Combo: {combo:.1f}x", True, GOLD)
-    
-    screen.blit(score_text, (20, 20))
-    screen.blit(fps_text, (20, 55))
-    screen.blit(combo_text, (20, 90))
-    
-    # Instructions
-    instr = pygame.font.SysFont("Arial", 18).render("Arrow Keys to Move", True, WHITE)
-    screen.blit(instr, (20, HEIGHT - 40))
-
-def game_over_screen(score):
-    screen.fill((15, 8, 25))
-    
-    # Starfield effect
-    for _ in range(80):
-        x = random.randint(0, WIDTH)
-        y = random.randint(0, HEIGHT)
-        size = random.randint(1, 3)
-        pygame.draw.circle(screen, (255, 255, 255, 30), (x, y), size)
-    
-    # Text
-    game_over_text = huge_font.render("GAME OVER", True, RED)
-    score_text = big_font.render(f"Final Score: {score}", True, WHITE)
-    restart_text = font.render("Press R to Restart or Q to Quit", True, WHITE)
-    
-    # Center text
-    screen.blit(game_over_text, (WIDTH//2 - game_over_text.get_width()//2, HEIGHT//3))
-    screen.blit(score_text, (WIDTH//2 - score_text.get_width()//2, HEIGHT//2))
-    screen.blit(restart_text, (WIDTH//2 - restart_text.get_width()//2, HEIGHT//2 + 80))
-    pygame.display.flip()
-
-def main():
-    snake = Snake()
-    food = Food(snake)
-    particles = []
-    score = 0
-    combo = 1.0
-    running = True
-    game_over = False
-
-    while running:
-        current_fps = get_fps(score)
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if game_over:
-                    if event.key == pygame.K_r:
-                        snake.reset()
-                        food = Food(snake)
-                        particles.clear()
-                        score = 0
-                        combo = 1.0
-                        game_over = False
-                        continue
-                    if event.key == pygame.K_q:
-                        pygame.quit()
-                        sys.exit()
-                else:
-                    if event.key == pygame.K_UP: 
-                        snake.change_direction(UP)
-                    elif event.key == pygame.K_DOWN: 
-                        snake.change_direction(DOWN)
-                    elif event.key == pygame.K_LEFT: 
-                        snake.change_direction(LEFT)
-                    elif event.key == pygame.K_RIGHT: 
-                        snake.change_direction(RIGHT)
-
-        if not game_over:
-            snake.move()
-            food.update()
-
-            # Eat food
-            if snake.body[0] == food.pos:
-                score += int(10 * combo)
-                combo += 0.15
-                snake.grow()
-                
-                # EXPLOSION!
-                for _ in range(35):
-                    particles.append(Particle(
-                        food.pos[0] * GRID_SIZE + GRID_SIZE//2,
-                        food.pos[1] * GRID_SIZE + GRID_SIZE//2,
-                        random.choice([GOLD, (255, 150, 100), PURPLE, RED])
-                    ))
-                food.respawn()
-
-            # Update particles
-            for p in particles[:]:
-                p.update()
-                if p.life <= 0:
-                    particles.remove(p)
-
-            # Collision
-            if snake.check_collision():
-                game_over = True
-
-        # RENDERING - FIXED!
-        # 1. Draw UI first (covers whole screen)
-        draw_ui(score, combo)
-        
-        # 2. Game area
-        game_offset_x = (WIDTH - GRID_WIDTH * GRID_SIZE) // 2
-        game_offset_y = 120
-        
-        # Create game surface
-        game_surface = pygame.Surface((GRID_WIDTH * GRID_SIZE, GRID_HEIGHT * GRID_SIZE))
-        game_surface.fill((8, 4, 15))  # Dark blue bg
-        
-        # Draw on game surface ONLY
-        draw_grid(game_surface)  # ✅ FIXED: Now on game_surface
-        snake.draw(game_surface)
-        food.draw(game_surface)
-        
-        # Particles (RELATIVE to game_surface)
-        for p in particles:
-            p.draw(game_surface)
-        
-        # Blit game surface to screen
-        screen.blit(game_surface, (game_offset_x, game_offset_y))
-
-        if game_over:
-            game_over_screen(score)
-
-        pygame.display.flip()
-        clock.tick(current_fps)
-
-    pygame.quit()
-
-if __name__ == "__main__":
-    main()
-  </script>
-
-  <script>
-    async function start() {
-      document.getElementById("status").textContent = "Loading Python...";
-      let pyodide = await loadPyodide();
-      document.getElementById("status").textContent = "Starting Game...";
-      pyodide.runPython(`
-        import js
-        from pygame import display
-        display.set_mode((800, 700))
-        js.document.getElementById("output").appendChild(display.get_surface().canvas)
-      `);
-      await pyodide.runPythonAsync(document.querySelector('script[type="text/python"]').textContent);
-      document.getElementById("status").remove();
+/* ---------- Snake ---------- */
+class Snake {
+  constructor(){
+    this.reset();
+  }
+  reset(){
+    this.body = [{x: Math.floor(GRID_W/2), y: Math.floor(GRID_H/2)}];
+    this.dir = {x:1,y:0};
+    this.growPending = 0;
+    this.trailAlpha = [255];
+  }
+  head(){ return this.body[0]; }
+  move(){
+    const head = this.head();
+    const newHead = {x: head.x + this.dir.x, y: head.y + this.dir.y};
+    this.body.unshift(newHead);
+    if(this.growPending>0){ this.growPending--; this.trailAlpha.unshift(255);}
+    else { this.body.pop(); if(this.trailAlpha.length) this.trailAlpha.pop(); }
+    if(this.trailAlpha.length>0) this.trailAlpha[0]=255;
+    if(this.trailAlpha.length>1) this.trailAlpha[this.trailAlpha.length-1] = Math.max(80, this.trailAlpha[this.trailAlpha.length-1]-15);
+  }
+  grow(){ this.growPending += 2; }
+  changeDir(nx,ny){
+    if(nx === -this.dir.x && ny === -this.dir.y) return;
+    this.dir={x:nx,y:ny};
+  }
+  checkCollision(){
+    const h = this.head();
+    if(h.x<0 || h.x>=GRID_W || h.y<0 || h.y>=GRID_H) return true;
+    for(let i=1;i<this.body.length;i++){ if(this.body[i].x===h.x && this.body[i].y===h.y) return true; }
+    return false;
+  }
+  draw(g){
+    for(let i=0;i<this.body.length;i++){
+      const seg = this.body[i];
+      const alpha = (i < this.trailAlpha.length) ? this.trailAlpha[i]/255 : Math.max(80, 255 - i*15)/255;
+      let color;
+      if(i===0) color = '#00ff00';
+      else {
+        const fade = i/Math.max(1,this.body.length);
+        const r = Math.floor(0*(1-fade) + 100*fade);
+        const gr = Math.floor(180*(1-fade) + 150*fade);
+        const b = Math.floor(0*(1-fade) + 50*fade);
+        color = `rgba(${r},${gr},${b},${alpha})`;
+      }
+      // glow
+      g.save();
+      const gx = seg.x * GRID_SIZE, gy = seg.y * GRID_SIZE;
+      g.beginPath();
+      g.globalAlpha = 0.12 * alpha;
+      g.fillStyle = '#64ff64';
+      g.arc(gx + GRID_SIZE/2, gy + GRID_SIZE/2, Math.max(8, GRID_SIZE*0.4 + i*0.1), 0, Math.PI*2);
+      g.fill();
+      g.restore();
+      // main rect
+      g.save();
+      g.globalAlpha = alpha;
+      g.fillStyle = color;
+      g.fillRect(gx+3, gy+3, GRID_SIZE-6, GRID_SIZE-6);
+      g.strokeStyle = '#fff';
+      g.lineWidth = 1;
+      g.strokeRect(gx+3, gy+3, GRID_SIZE-6, GRID_SIZE-6);
+      g.restore();
     }
-    start();
-  </script>
+  }
+}
+
+/* ---------- Food ---------- */
+class Food {
+  constructor(snake){
+    this.snake = snake;
+    this.respawn();
+    this.pulse = 0;
+  }
+  respawn(){
+    while(true){
+      const x=randInt(0,GRID_W-1), y=randInt(0,GRID_H-1);
+      if(!this.snake.body.some(p=>p.x===x && p.y===y)){ this.pos={x,y}; break; }
+    }
+    this.pulse=0;
+  }
+  update(){ this.pulse += 0.15; }
+  draw(g){
+    const pulseScale = 1 + 0.15*Math.sin(this.pulse);
+    const size = Math.floor(GRID_SIZE*0.65 * pulseScale);
+    const x = this.pos.x * GRID_SIZE, y = this.pos.y * GRID_SIZE;
+    // glow ring
+    g.save();
+    g.globalAlpha = 0.6;
+    g.fillStyle = '#ffd700';
+    g.beginPath();
+    g.arc(x + GRID_SIZE/2, y + GRID_SIZE/2, size/2 + 10, 0, Math.PI*2);
+    g.fill();
+    g.restore();
+    // main food
+    g.save();
+    g.fillStyle = '#ff3232';
+    g.beginPath();
+    g.arc(x + GRID_SIZE/2, y + GRID_SIZE/2, size/2, 0, Math.PI*2);
+    g.fill();
+    g.lineWidth = 2;
+    g.strokeStyle = '#ffd700';
+    g.stroke();
+    g.restore();
+  }
+}
+
+/* ---------- draw grid & UI ---------- */
+function drawGrid(g){
+  g.save();
+  g.strokeStyle = '#787878';
+  g.lineWidth = 1;
+  for(let x=0;x<=GRID_W;x++){
+    g.beginPath(); g.moveTo(x*GRID_SIZE,0); g.lineTo(x*GRID_SIZE, GRID_H*GRID_SIZE); g.stroke();
+  }
+  for(let y=0;y<=GRID_H;y++){
+    g.beginPath(); g.moveTo(0,y*GRID_SIZE); g.lineTo(GRID_W*GRID_SIZE, y*GRID_SIZE); g.stroke();
+  }
+  g.restore();
+}
+
+function drawUI(){
+  // top panel
+  const g = ctx;
+  // background gradient for UI area
+  const grad = ctx.createLinearGradient(0,0,0,120);
+  grad.addColorStop(0, 'rgb(15,8,25)');
+  grad.addColorStop(1, 'rgb(40,20,55)');
+  g.fillStyle = grad;
+  g.fillRect(0,0,WIDTH,120);
+
+  // texts
+  g.save();
+  g.fillStyle = '#fff';
+  g.font = '20px Arial';
+  g.fillText('Score: ' + score, 20, 30);
+  g.fillStyle = '#64ff64';
+  g.fillText('Speed: ' + fps, 20, 60);
+  g.fillStyle = '#ffd700';
+  g.fillText('Combo: ' + combo.toFixed(1) + 'x', 20, 90);
+
+  g.fillStyle = '#ddd';
+  g.font = '14px Arial';
+  g.fillText('Arrow Keys to Move', 20, HEIGHT - 20);
+  g.restore();
+}
+
+/* ---------- main loop ---------- */
+function init(){
+  snake = new Snake();
+  food = new Food(snake);
+  particles = [];
+  score = 0;
+  combo = 1.0;
+  running = true;
+  gameOver = false;
+  lastTick = performance.now();
+  fps = getFps(score);
+  scoreEl.textContent = 'Score: 0';
+  speedEl.textContent = 'Speed: ' + fps;
+  comboEl.textContent = 'Combo: 1.0x';
+}
+
+function spawnExplosion(x,y){
+  for(let i=0;i<35;i++){
+    const col = ['#ffd700','#ff9664','#c832ff','#ff3232'][Math.floor(Math.random()*4)];
+    particles.push(new Particle(x,y,col));
+  }
+}
+
+/* keyboard */
+const KEY = {ArrowUp:false,ArrowDown:false,ArrowLeft:false,ArrowRight:false};
+window.addEventListener('keydown', (e)=>{
+  if(gameOver){
+    if(e.key==='r' || e.key==='R'){ init(); return; }
+    if(e.key==='q' || e.key==='Q'){ window.close(); return; }
+  } else {
+    if(e.key === 'ArrowUp') snake.changeDir(0,-1);
+    if(e.key === 'ArrowDown') snake.changeDir(0,1);
+    if(e.key === 'ArrowLeft') snake.changeDir(-1,0);
+    if(e.key === 'ArrowRight') snake.changeDir(1,0);
+  }
+});
+
+/* mouse/touch quick controls for mobile: simple directional tap zones */
+canvas.addEventListener('click', (ev)=>{
+  // left half -> left, right half -> right, top/bottom zones for up/down
+  const rect=canvas.getBoundingClientRect();
+  const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+  if(y < 120) return; // clicking UI
+  const gx = x - (WIDTH - GRID_W*GRID_SIZE)/2;
+  const gy = y - 120;
+  if(Math.abs(gx - (snake.head().x*GRID_SIZE + GRID_SIZE/2)) > Math.abs(gy - (snake.head().y*GRID_SIZE + GRID_SIZE/2))){
+    if(gx < snake.head().x*GRID_SIZE + GRID_SIZE/2) snake.changeDir(-1,0);
+    else snake.changeDir(1,0);
+  } else {
+    if(gy < snake.head().y*GRID_SIZE + GRID_SIZE/2) snake.changeDir(0,-1);
+    else snake.changeDir(0,1);
+  }
+});
+
+/* game tick */
+function tick(){
+  if(gameOver) return;
+  snake.move();
+  food.update();
+
+  // eat
+  const h = snake.head();
+  if(h.x === food.pos.x && h.y === food.pos.y){
+    score += Math.floor(10 * combo);
+    combo += 0.15;
+    snake.grow();
+    spawnExplosion(food.pos.x * GRID_SIZE + GRID_SIZE/2, food.pos.y*GRID_SIZE + GRID_SIZE/2);
+    food.respawn();
+    fps = getFps(score);
+    scoreEl.textContent = 'Score: ' + score;
+    speedEl.textContent = 'Speed: ' + fps;
+    comboEl.textContent = 'Combo: ' + combo.toFixed(1) + 'x';
+  }
+
+  // update particles
+  for(let i = particles.length-1;i>=0;i--){
+    particles[i].update();
+    if(particles[i].life <= 0) particles.splice(i,1);
+  }
+
+  if(snake.checkCollision()){
+    gameOver = true;
+  }
+}
+
+/* render */
+function render(){
+  // draw UI area + background
+  // full background gradient
+  const g = ctx;
+  const fullGrad = g.createLinearGradient(0,0,0,HEIGHT);
+  fullGrad.addColorStop(0,'rgb(15,8,25)');
+  fullGrad.addColorStop(1,'rgb(5,2,10)');
+  g.fillStyle = fullGrad;
+  g.fillRect(0,0,WIDTH,HEIGHT);
+
+  drawUI();
+
+  // game surface (centered)
+  const gx = (WIDTH - GRID_W*GRID_SIZE)/2;
+  const gy = 120;
+  // dark game background
+  g.save();
+  g.fillStyle = '#080415';
+  g.fillRect(gx, gy, GRID_W*GRID_SIZE, GRID_H*GRID_SIZE);
+  g.restore();
+
+  // set clipping to game rect
+  g.save();
+  g.translate(gx, gy);
+  drawGrid(g);
+  snake.draw(g);
+  food.draw(g);
+  for(const p of particles) p.draw(g);
+  g.restore();
+
+  if(gameOver){
+    g.save();
+    g.fillStyle = 'rgba(15,8,25,0.95)';
+    g.fillRect(0,0,WIDTH,HEIGHT);
+    g.fillStyle = '#ff3232';
+    g.font = '48px Arial';
+    g.fillText('GAME OVER', WIDTH/2 - 150, HEIGHT/3);
+    g.fillStyle = '#fff';
+    g.font = '28px Arial';
+    g.fillText('Final Score: ' + score, WIDTH/2 - 120, HEIGHT/2);
+    g.font = '18px Arial';
+    g.fillText('Press R to Restart or Q to Quit', WIDTH/2 - 130, HEIGHT/2 + 60);
+    g.restore();
+  }
+}
+
+/* main loop with variable fps */
+function loop(now){
+  requestAnimationFrame(loop);
+  if(!lastTick) lastTick = now;
+  const msPerTick = 1000 / fps;
+  if(now - lastTick >= msPerTick){
+    tick();
+    lastTick = now;
+  }
+  render();
+}
+
+/* start */
+init();
+requestAnimationFrame(loop);
+</script>
 </body>
 </html>
